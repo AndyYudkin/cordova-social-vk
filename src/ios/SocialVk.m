@@ -9,7 +9,7 @@ static NSString *VK_AUTHORIZE_URL_STRING = @"vkauthorize://authorize";
 
 @implementation SocialVk {
     CDVInvokedUrlCommand *savedCommand;
-    void (^vkCallBackBlock)(NSString *, NSString *);
+    void (^vkCallBackBlock)(NSString *, NSString *, NSString *);
     BOOL inited;
     NSMutableDictionary *loginDetails;
 }
@@ -64,7 +64,7 @@ static NSString *VK_AUTHORIZE_URL_STRING = @"vkauthorize://authorize";
 {
     NSArray *permissions = [command.arguments objectAtIndex:0];
     if(![VKSdk isLoggedIn]) {
-        [self vkLoginWithPermissions:permissions andBlock:^(NSString *token, NSString *error) {
+        [self vkLoginWithPermissions:permissions andBlock:^(NSString *token, NSString *email, NSString *error) {
             if(token) {
                 VKRequest *req = [VKRequest requestWithMethod:@"users.get" parameters:@{@"fields": @"id, nickname, first_name, last_name, sex, bdate, timezone, photo, photo_big, city, country"}];
                 [req executeWithResultBlock:^(VKResponse *response) {
@@ -73,6 +73,7 @@ static NSString *VK_AUTHORIZE_URL_STRING = @"vkauthorize://authorize";
                     CDVPluginResult* pluginResult = nil;
                     loginDetails = [NSMutableDictionary new];
                     loginDetails[@"token"] = token;
+                    loginDetails[@"email"] = email;
                     if([response.json isKindOfClass:NSArray.class] && [(NSArray*)response.json count]>0 )
                         loginDetails[@"user"] = [response.json objectAtIndex:0];
                     pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:loginDetails];
@@ -122,9 +123,9 @@ static NSString *VK_AUTHORIZE_URL_STRING = @"vkauthorize://authorize";
     NSString* description = [command.arguments objectAtIndex:1];
     NSString* imageURL = [command.arguments objectAtIndex:2];
     //NSData *imageData = [NSData dataWithContentsOfURL:[NSURL URLWithString:imageURL]];
-
+    
     if(![VKSdk isLoggedIn]) {
-        [self vkLoginWithPermissions:nil andBlock:^(NSString *token, NSString *error) {
+        [self vkLoginWithPermissions:nil andBlock:^(NSString *token, NSString *email, NSString *error) {
             CDVPluginResult* pluginResult = nil;
             if(token) {
                 VKShareDialogController *sh = [VKShareDialogController new];
@@ -156,11 +157,11 @@ static NSString *VK_AUTHORIZE_URL_STRING = @"vkauthorize://authorize";
     }
 }
 
--(void)vkLoginWithPermissions:(NSArray*)permissions andBlock:(void (^)(NSString *, NSString *))block
+-(void)vkLoginWithPermissions:(NSArray*)permissions andBlock:(void (^)(NSString *, NSString *, NSString *))block
 {
     vkCallBackBlock = [block copy];
     if(!permissions || permissions.count < 1)
-    permissions = @[VK_PER_WALL, VK_PER_OFFLINE];
+        permissions = @[VK_PER_WALL, VK_PER_OFFLINE];
     //BOOL inApp = YES;
     //if([[UIApplication sharedApplication] canOpenURL:[NSURL URLWithString:VK_AUTHORIZE_URL_STRING]])
     //    inApp = NO;
@@ -375,10 +376,16 @@ static NSString *VK_AUTHORIZE_URL_STRING = @"vkauthorize://authorize";
 - (void)vkSdkAccessAuthorizationFinishedWithResult:(VKAuthorizationResult *)result;
 {
     NSLog(@"VK Access authorization finished");
-    if(result.error) {
+    if (result.token) {
+        if(vkCallBackBlock)
+            vkCallBackBlock(result.token.accessToken, result.token.email, nil);
+        vkCallBackBlock = nil;
+        
+    }
+    else if(result.error) {
         NSLog(@"VK Error %@", result.error);
         if(vkCallBackBlock) {
-            vkCallBackBlock(nil, result.error.description);
+            vkCallBackBlock(nil, nil, result.error.description);
             vkCallBackBlock = nil;
         } else if(savedCommand) {
             CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:result.error.description];
@@ -395,8 +402,6 @@ static NSString *VK_AUTHORIZE_URL_STRING = @"vkauthorize://authorize";
 - (void)vkSdkAccessTokenUpdated:(VKAccessToken *)newToken oldToken:(VKAccessToken *)oldToken;
 {
     NSLog(@"VK Token %@", newToken.accessToken);
-    if(vkCallBackBlock) vkCallBackBlock(newToken.accessToken, nil);
-    vkCallBackBlock = nil;
 }
 
 - (void)vkSdkTokenHasExpired:(VKAccessToken *)expiredToken;
